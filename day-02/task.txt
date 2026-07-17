@@ -1,0 +1,1 @@
+The main task for this day was just to install Ollama but since I have claude code I will use that for future task help.
