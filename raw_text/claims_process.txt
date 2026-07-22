@@ -1,0 +1,31 @@
+Member Claims Process Guide
+This document explains how members file, track, and appeal claims under their coverage plan. This is a sample/synthetic document for training purposes only.
+1. Filing a Claim
+Most in-network claims are filed automatically by your provider. For out-of-network care, or if your provider does not file on your behalf, follow the steps below.
+Complete the Member Claim Form, available on the member portal.
+Attach an itemized bill from your provider, including procedure codes.
+Attach proof of payment if you paid out of pocket.
+Submit the claim within 90 days of the date of service.
+Submit via the member portal, mobile app, or mail to the address on your member ID card.
+2. Claim Statuses
+Pending — Claim has been received and is under review. Typical review time is 10-14 business days.
+Approved — Claim has been processed and payment has been issued to the provider or member.
+Denied — Claim was not approved for payment. A denial letter with the specific reason is mailed and posted to the member portal.
+Partially Approved — Some services on the claim were approved and others were denied or reduced.
+3. Common Reasons for Denial
+Service not covered under the member's plan.
+Prior authorization was required but not obtained.
+Claim was filed after the 90-day deadline.
+Provider is out-of-network and the plan does not cover out-of-network care.
+Missing or incomplete documentation.
+4. How to Appeal a Denied Claim
+Members have the right to appeal a denied or partially approved claim. Appeals must be submitted in writing within 180 days of the denial notice.
+Submit a written appeal request, including your member ID and claim number.
+Include any supporting documentation, such as a letter of medical necessity from your provider.
+The plan will respond to standard appeals within 30 days.
+Expedited appeals (urgent medical situations) are reviewed within 72 hours.
+If the internal appeal is denied, members may request an external review by an independent third party.
+5. Contact Information
+Member Services: 1-800-555-0142 (Mon–Fri, 8am–8pm)
+Claims mailing address: PO Box 4021, Springfield, ST 00000
+Member portal: portal.samplecoverage.example.com

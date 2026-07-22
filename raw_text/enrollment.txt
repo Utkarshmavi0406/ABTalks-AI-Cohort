@@ -1,0 +1,48 @@
+--- Page 1 (OCR) ---
+Health Plan Enroliment Form
+
+Sample / synthetic document for training purposes only
+
+Section 1: Member Information
+
+First Name Last Name
+Maria Alvarez
+eee
+
+Date of Birth (MM/DD/YYYY) Member ID
+03/14/1988 M1004
+ol Ac a EE
+
+Home Address
+
+482 Ridgeview Lane, Springfield, ST 00000
+
+Phone Number Email
+
+(555) 019-2837 m.alvarez@example.com
+
+Section 2: Plan Selection
+
+Selected Plan Pian (D
+
+Silver HMO P102
+$$$ eee
+
+Coverage Start Date Coverage Type
+05/01/2026 Individual
+eassiiiettsiespneetepeeestann sii epee ee
+
+Section 3: Dependent Information (if applicable)
+
+Dependent Name Relationship
+
+None N/A
+a
+
+Section 4: Authorization
+
+| certify that the information provided above is accurate and complete to the best of my knowledge.
+
+Signature Date Signed
+M. Alvarez 04/22/2026
+eee
