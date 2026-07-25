@@ -3,4 +3,6 @@ __pycache__/
 *.pyc
 .env
 node_modules/
-dist/.DS_Store
+dist/
+.DS_Store
+chroma_data/
