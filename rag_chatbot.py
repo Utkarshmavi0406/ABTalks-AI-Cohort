@@ -41,6 +41,20 @@ def generate_answer(question: str, context: str) -> str:
     )
     return response.choices[0].message.content
 
+# ---------- Day 18: streaming generation ----------
+def generate_answer_stream(question: str, context: str):
+    """Yield answer tokens one at a time as they arrive from the LLM."""
+    prompt = GROUNDING_PROMPT.format(context=context, question=question)
+    stream = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
 
 # ---------- Step 4: chain retrieve -> generate ----------
 def retrieve_and_answer(question: str) -> dict:

@@ -1,7 +1,7 @@
 """
 app.py
-Day 17 — Chatbot Frontend Development
-Streamlit chat UI that talks to the Day 16 FastAPI /chat backend.
+Day 18 — Full-Stack Integration & Streaming Responses
+Streamlit chat UI that consumes the /chat SSE stream token-by-token.
 """
 
 import uuid
@@ -17,23 +17,20 @@ API_URL = "http://localhost:8000"
 st.set_page_config(page_title="Coverage Assistant", page_icon="⚕", layout="centered")
 
 # ---------- Design system ----------
-# A calm, trustworthy palette for a health-coverage context: deep teal accent
-# against a cool off-white, avoiding both sterile hospital-blue and the
-# generic warm-cream/terracotta AI-chat look.
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-    --teal-900: #14312F;
-    --teal-700: #2C6E6B;
-    --teal-500: #4A9490;
-    --teal-100: #E3F0EC;
-    --bg: #F6F8F7;
-    --card: #FFFFFF;
-    --border: #DCE7E3;
-    --text: #1F2A28;
-    --muted: #66766F;
+    --teal-300: #7FC4BB;
+    --teal-500: #57A79E;
+    --teal-700: #3D8A82;
+    --bg: #0E1614;
+    --sidebar-bg: #12201C;
+    --card: #16211E;
+    --border: #253531;
+    --text: #EAF2EF;
+    --muted: #93A9A3;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
@@ -46,9 +43,6 @@ html, body, [data-testid="stAppViewContainer"] {
     background: transparent;
 }
 
-/* Bottom chat-input bar: Streamlit renders this as a separate fixed
-   container that doesn't inherit the main page background, so it needs
-   its own explicit override or it shows the app's dark theme default. */
 [data-testid="stBottom"],
 [data-testid="stBottomBlockContainer"],
 [data-testid="stChatInput"] {
@@ -59,18 +53,16 @@ html, body, [data-testid="stAppViewContainer"] {
     border-top: 1px solid var(--border);
 }
 
-/* Sidebar */
 [data-testid="stSidebar"] {
-    background: var(--teal-100);
+    background: var(--sidebar-bg);
     border-right: 1px solid var(--border);
 }
 [data-testid="stSidebar"] h2, [data-testid="stSidebar"] label {
     font-family: 'Inter', sans-serif;
-    color: var(--teal-900);
+    color: var(--text);
     font-weight: 600;
 }
 
-/* Title block */
 .app-header {
     padding: 0.5rem 0 1.25rem 0;
     border-bottom: 1px solid var(--border);
@@ -80,7 +72,7 @@ html, body, [data-testid="stAppViewContainer"] {
     font-family: 'Fraunces', serif;
     font-weight: 600;
     font-size: 2.4rem;
-    color: var(--teal-900);
+    color: var(--teal-300);
     margin: 0;
     letter-spacing: -0.01em;
 }
@@ -93,22 +85,26 @@ html, body, [data-testid="stAppViewContainer"] {
 .accent-rule {
     height: 3px;
     width: 64px;
-    background: linear-gradient(90deg, var(--teal-700), var(--teal-500));
+    background: linear-gradient(90deg, var(--teal-700), var(--teal-300));
     border-radius: 2px;
     margin-top: 0.6rem;
 }
 
-/* Chat bubbles */
 [data-testid="stChatMessage"] {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 0.5rem 0.75rem;
     margin-bottom: 0.6rem;
-    box-shadow: 0 1px 2px rgba(20, 49, 47, 0.04);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+[data-testid="stChatMessage"] p,
+[data-testid="stChatMessage"] li,
+[data-testid="stChatMessage"] span,
+[data-testid="stChatMessage"] div {
+    color: var(--text) !important;
 }
 
-/* Chat input */
 [data-testid="stChatInput"] {
     max-width: 760px;
     margin: 0 auto;
@@ -117,7 +113,7 @@ html, body, [data-testid="stAppViewContainer"] {
     background: var(--card) !important;
     border: 1.5px solid var(--border) !important;
     border-radius: 14px !important;
-    box-shadow: 0 1px 3px rgba(20, 49, 47, 0.06);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 [data-testid="stChatInput"] textarea {
     background: var(--card) !important;
@@ -137,25 +133,23 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 [data-testid="stChatInput"]:focus-within > div {
     border-color: var(--teal-500) !important;
-    box-shadow: 0 0 0 2px rgba(74, 148, 144, 0.25) !important;
+    box-shadow: 0 0 0 2px rgba(87, 167, 158, 0.3) !important;
 }
 
-/* Buttons */
 .stButton button {
     background: var(--card);
-    color: var(--teal-700);
+    color: var(--teal-300);
     border: 1px solid var(--teal-500);
     border-radius: 10px;
     font-weight: 500;
     transition: background 0.15s ease;
 }
 .stButton button:hover {
-    background: var(--teal-100);
-    border-color: var(--teal-700);
-    color: var(--teal-900);
+    background: var(--sidebar-bg);
+    border-color: var(--teal-300);
+    color: var(--teal-300);
 }
 
-/* Session id badge */
 .session-badge {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
@@ -168,7 +162,6 @@ html, body, [data-testid="stAppViewContainer"] {
     margin-top: 0.5rem;
 }
 
-/* Selectbox */
 [data-testid="stSelectbox"] > div > div {
     border-radius: 10px !important;
     border-color: var(--border) !important;
@@ -181,8 +174,8 @@ st.markdown("""
     <div style="display:flex; align-items:center; gap:0.9rem;">
         <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22 3 L38 9 V21 C38 31 31 38 22 41 C13 38 6 31 6 21 V9 Z"
-                  fill="#E3F0EC" stroke="#2C6E6B" stroke-width="2"/>
-            <path d="M22 14 V28 M15 21 H29" stroke="#2C6E6B" stroke-width="3" stroke-linecap="round"/>
+                  fill="#16302B" stroke="#57A79E" stroke-width="2"/>
+            <path d="M22 14 V28 M15 21 H29" stroke="#7FC4BB" stroke-width="3" stroke-linecap="round"/>
         </svg>
         <h1 style="margin:0;">Coverage Assistant</h1>
     </div>
@@ -191,22 +184,17 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-ASSISTANT_AVATAR = "⚕"
+ASSISTANT_AVATAR = "🩺"
 USER_AVATAR = "🙂"
 
-# ---------- Step 3: session_id, created once, persisted in session_state ----------
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
-
-# ---------- Step 4: message history, persisted across reruns ----------
 if "messages" not in st.session_state:
-    st.session_state.messages = []  # list of {"role": "user"/"assistant", "content": str}
-
+    st.session_state.messages = []
 if "member_id" not in st.session_state:
-    st.session_state.member_id = "M1001"  # placeholder; a real app would authenticate this
+    st.session_state.member_id = "M1001"
 
 
-# ---------- Step 5: sidebar ----------
 with st.sidebar:
     st.header("Options")
 
@@ -232,7 +220,6 @@ with st.sidebar:
     )
 
 
-# ---------- Step 2: render the conversation thread ----------
 if not st.session_state.messages:
     st.markdown(
         "<p style='color: var(--muted); font-style: italic;'>"
@@ -247,7 +234,59 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 
-# ---------- Step 3 + 4: handle new input ----------
+# ---------- Step 3 + 4 + 5: streaming input handling ----------
+def stream_chat_response(placeholder, session_id: str, member_id: str, message: str) -> str:
+    """POST to /chat with stream=True, render tokens into `placeholder` as
+    they arrive, and return the final assembled answer text."""
+    full_text = ""
+    first_token_received = False
+
+    # Step 5: show a loading state before the first token arrives
+    placeholder.markdown("_Thinking..._")
+
+    try:
+        with requests.post(
+            f"{API_URL}/chat",
+            json={"session_id": session_id, "member_id": member_id, "message": message},
+            stream=True,
+            timeout=(5, 90),  # (connect timeout, read timeout)
+        ) as response:
+            response.raise_for_status()
+
+            for line in response.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data: "):
+                    continue
+
+                payload = line[len("data: "):]
+
+                if payload == "[DONE]":
+                    break
+
+                if payload.startswith("[ERROR]"):
+                    full_text = payload.replace("[ERROR]", "").strip()
+                    placeholder.markdown(f"⚠️ {full_text}")
+                    return full_text
+
+                token = payload.replace("\\n", "\n")
+                full_text += token
+                first_token_received = True
+                # Step 4: visibly "type out" — show accumulated text with a
+                # cursor character while streaming, no full-answer wait
+                placeholder.markdown(full_text + "▌")
+
+    except requests.exceptions.RequestException as e:
+        # Step 6: dropped connection / timeout on the client side
+        error_msg = "Sorry, I lost connection to the coverage backend. Please try again."
+        placeholder.markdown(f"⚠️ {error_msg}")
+        return error_msg
+
+    if not first_token_received and not full_text:
+        full_text = "Sorry, I didn't get a response. Please try again."
+
+    placeholder.markdown(full_text)  # final render, no trailing cursor
+    return full_text
+
+
 user_input = st.chat_input("Ask about your coverage...")
 
 if user_input:
@@ -256,22 +295,12 @@ if user_input:
         st.markdown(user_input)
 
     with st.chat_message("assistant", avatar=ASSISTANT_AVATAR):
-        with st.spinner("Thinking..."):
-            try:
-                response = requests.post(
-                    f"{API_URL}/chat",
-                    json={
-                        "session_id": st.session_state.session_id,
-                        "member_id": st.session_state.member_id,
-                        "message": user_input,
-                    },
-                    timeout=60,
-                )
-                response.raise_for_status()
-                answer = response.json()["answer"]
-            except requests.exceptions.RequestException as e:
-                answer = f"Sorry, I couldn't reach the coverage backend right now. ({e})"
-
-        st.markdown(answer)
+        placeholder = st.empty()
+        answer = stream_chat_response(
+            placeholder,
+            st.session_state.session_id,
+            st.session_state.member_id,
+            user_input,
+        )
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
