@@ -1,9 +1,7 @@
 """
 coverage-chatbot-api/main.py
-Day 18 — Full-Stack Integration & Streaming Responses
-
-/chat now streams the answer token-by-token via Server-Sent Events (SSE)
-instead of waiting for the full response before returning.
+Day 19 — adds citation chunk-ID tracking to the streaming /chat endpoint
+(everything else unchanged from Day 18).
 """
 
 import sys
@@ -21,8 +19,8 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from retrieval_engine import retrieve  # noqa: E402  (Day 10)
-from rag_chatbot import generate_answer_stream  # noqa: E402  (Day 18 addition to rag_chatbot.py)
+from retrieval_engine import retrieve  # noqa: E402
+from rag_chatbot import generate_answer_stream  # noqa: E402
 
 app = FastAPI()
 
@@ -47,7 +45,6 @@ def health():
     return {"status": "ok"}
 
 
-# ---------- Step 1 + 2: streaming POST /chat ----------
 @app.post("/chat")
 def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
@@ -66,9 +63,8 @@ def chat(request: ChatRequest):
         start_time = time.monotonic()
         full_answer = ""
         classification = "error"
+        citation_ids: list[str] = []
 
-        # ---------- retrieval step (not streamed itself, but wrapped so a
-        # failure here still produces a clean SSE error event) ----------
         try:
             retrieval_result = retrieve(request.message)
         except Exception as e:
@@ -80,12 +76,15 @@ def chat(request: ChatRequest):
         classification = retrieval_result["classification"]
         context = retrieval_result["context"]
 
-        # ---------- Step 6: handle a dropped connection mid-stream ----------
+        # Step 1: track which chunks were actually passed into context --
+        # these are the vector-search results (policy text chunks), not the
+        # SQL rows, since "citations" here means "which policy source did
+        # this answer draw from"
+        citation_ids = [c["id"] for c in retrieval_result.get("vector_results", [])]
+
         try:
             for token in generate_answer_stream(request.message, context):
                 full_answer += token
-                # SSE payloads can't contain raw newlines; escape them so
-                # each token stays on its own "data: ..." line
                 safe_token = token.replace("\n", "\\n")
                 yield f"data: {safe_token}\n\n"
         except Exception as e:
@@ -100,14 +99,16 @@ def chat(request: ChatRequest):
                     "role": "assistant",
                     "content": full_answer,
                     "classification": classification,
+                    "citations": citation_ids,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
+            if citation_ids:
+                yield f"data: [CITATIONS] {'|'.join(citation_ids)}\n\n"
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-# ---------- GET /history/{session_id} (unchanged from Day 16) ----------
 @app.get("/history/{session_id}")
 def get_history(session_id: str):
     if session_id not in SESSION_STORE:

@@ -11,6 +11,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from response_cards import try_build_card
+
 ROOT = Path(__file__).resolve().parent
 API_URL = "http://localhost:8000"
 
@@ -234,14 +236,35 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 
-# ---------- Step 3 + 4 + 5: streaming input handling ----------
-def stream_chat_response(placeholder, session_id: str, member_id: str, message: str) -> str:
+# ---------- Step 3/4: render a structured card ----------
+def render_card(card):
+    from response_cards import ClaimStatusCard, CoverageSummaryCard
+
+    if isinstance(card, ClaimStatusCard):
+        with st.container(border=True):
+            st.markdown(f"**Claim {card.claim_id}**")
+            cols = st.columns(3)
+            cols[0].metric("Status", card.status)
+            cols[1].metric("Amount", f"${card.amount:,.2f}")
+            cols[2].metric("Date filed", card.date)
+
+    elif isinstance(card, CoverageSummaryCard):
+        with st.container(border=True):
+            st.markdown(f"**{card.plan_name} — Coverage Summary**")
+            cols = st.columns(3)
+            cols[0].metric("Deductible", f"${card.deductible:,.0f}")
+            cols[1].metric("Copay", f"{card.copay:.0f}%")
+            cols[2].metric("Covered", "✅ Yes" if card.covered else "❌ No")
+
+
+# ---------- Step 1 + 2: streaming input handling with citation capture ----------
+def stream_chat_response(placeholder, session_id: str, member_id: str, message: str):
     """POST to /chat with stream=True, render tokens into `placeholder` as
-    they arrive, and return the final assembled answer text."""
+    they arrive, and return (final_answer_text, citation_ids)."""
     full_text = ""
     first_token_received = False
+    citation_ids = []
 
-    # Step 5: show a loading state before the first token arrives
     placeholder.markdown("_Thinking..._")
 
     try:
@@ -249,7 +272,7 @@ def stream_chat_response(placeholder, session_id: str, member_id: str, message: 
             f"{API_URL}/chat",
             json={"session_id": session_id, "member_id": member_id, "message": message},
             stream=True,
-            timeout=(5, 90),  # (connect timeout, read timeout)
+            timeout=(5, 90),
         ) as response:
             response.raise_for_status()
 
@@ -262,29 +285,31 @@ def stream_chat_response(placeholder, session_id: str, member_id: str, message: 
                 if payload == "[DONE]":
                     break
 
+                if payload.startswith("[CITATIONS]"):
+                    ids_str = payload.replace("[CITATIONS]", "").strip()
+                    citation_ids = [c for c in ids_str.split("|") if c]
+                    continue
+
                 if payload.startswith("[ERROR]"):
                     full_text = payload.replace("[ERROR]", "").strip()
                     placeholder.markdown(f"⚠️ {full_text}")
-                    return full_text
+                    return full_text, citation_ids
 
                 token = payload.replace("\\n", "\n")
                 full_text += token
                 first_token_received = True
-                # Step 4: visibly "type out" — show accumulated text with a
-                # cursor character while streaming, no full-answer wait
                 placeholder.markdown(full_text + "▌")
 
-    except requests.exceptions.RequestException as e:
-        # Step 6: dropped connection / timeout on the client side
+    except requests.exceptions.RequestException:
         error_msg = "Sorry, I lost connection to the coverage backend. Please try again."
         placeholder.markdown(f"⚠️ {error_msg}")
-        return error_msg
+        return error_msg, citation_ids
 
     if not first_token_received and not full_text:
         full_text = "Sorry, I didn't get a response. Please try again."
 
-    placeholder.markdown(full_text)  # final render, no trailing cursor
-    return full_text
+    placeholder.markdown(full_text)
+    return full_text, citation_ids
 
 
 user_input = st.chat_input("Ask about your coverage...")
@@ -296,11 +321,23 @@ if user_input:
 
     with st.chat_message("assistant", avatar=ASSISTANT_AVATAR):
         placeholder = st.empty()
-        answer = stream_chat_response(
+        answer, citation_ids = stream_chat_response(
             placeholder,
             st.session_state.session_id,
             st.session_state.member_id,
             user_input,
         )
+
+        # Step 4: render a structured card when the question clearly maps
+        # to a claim lookup or a plan+procedure coverage check
+        card = try_build_card(user_input)
+        if card is not None:
+            render_card(card)
+
+        # Step 2: citations as an expandable "Policy sources" section
+        if citation_ids:
+            with st.expander(f"Policy sources ({len(citation_ids)})"):
+                for cid in citation_ids:
+                    st.markdown(f"- `{cid}`")
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
