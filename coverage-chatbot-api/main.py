@@ -28,6 +28,8 @@ sys.path.insert(0, str(ROOT))
 
 from retrieval_engine import retrieve  # noqa: E402
 from rag_chatbot import generate_answer_stream, client, MODEL  # noqa: E402
+from redact_pii import redact_pii  # noqa: E402  (Day 25)
+from guardrails_config import check_input_guardrail, check_output_guardrail  # noqa: E402  (Day 25)
 
 app = FastAPI()
 
@@ -195,6 +197,22 @@ def health():
 def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
 
+    # ---------- Step 4: input guardrail, checked BEFORE any LLM call ----------
+    is_safe, block_reason = check_input_guardrail(request.message)
+    print(f"[LOG] session={session_id} user_message={redact_pii(request.message)!r}")
+
+    if not is_safe:
+        print(f"[GUARDRAIL] session={session_id} INPUT BLOCKED: {block_reason}")
+
+        def blocked_generator():
+            canned = "I can't process that request. Please rephrase your question about your own coverage or claims."
+            save_turn(session_id, "user", request.message)
+            save_turn(session_id, "assistant", canned)
+            yield f"data: {canned}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(blocked_generator(), media_type="text/event-stream")
+
     save_turn(session_id, "user", request.message)
 
     def event_generator():
@@ -259,8 +277,29 @@ def chat(request: ChatRequest):
         finally:
             elapsed = time.monotonic() - start_time
             print(f"[TIMING] /chat session={session_id} classification={classification} took {elapsed:.2f}s")
+
+            # ---------- Step 5: output guardrail ----------
+            # Limitation, stated plainly: since the answer was already
+            # streamed token-by-token, a flagged output can't be un-sent.
+            # This checks the FULL assembled answer after the fact, logs any
+            # PHI/medical-advice issue, saves the SAFE (redacted or
+            # disclaimer-replaced) version to persistent history rather than
+            # the raw text, and sends an additional safety-notice event so
+            # the client can display a correction. A production system would
+            # need to check the answer before streaming begins (e.g. a
+            # non-streamed pre-check call) to actually prevent a flagged
+            # response from ever reaching the member.
             if full_answer:
-                save_turn(session_id, "assistant", full_answer)
+                is_output_safe, safe_answer = check_output_guardrail(full_answer)
+                print(f"[LOG] session={session_id} assistant_answer={redact_pii(full_answer)!r}")
+
+                if not is_output_safe:
+                    print(f"[GUARDRAIL] session={session_id} OUTPUT FLAGGED — saving redacted/disclaimer version to history")
+                    save_turn(session_id, "assistant", safe_answer)
+                    yield f"data: [SAFETY NOTICE] {safe_answer}\n\n"
+                else:
+                    save_turn(session_id, "assistant", full_answer)
+
             if citation_ids:
                 yield f"data: [CITATIONS] {'|'.join(citation_ids)}\n\n"
             yield "data: [DONE]\n\n"
