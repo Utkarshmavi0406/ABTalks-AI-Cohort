@@ -43,19 +43,22 @@ app.add_middleware(
 LAST_N_TURNS = 10
 TOKEN_BUDGET = 2000
 
-# ---------- token counting (tiktoken, with a rough-estimate fallback) ----------
-try:
-    import tiktoken
-    _ENCODING = tiktoken.get_encoding("cl100k_base")
+# ---------- Day 26: token counting, now in its own module ----------
+from token_utils import count_tokens  # noqa: E402
 
-    def count_tokens(text: str) -> int:
-        return len(_ENCODING.encode(text))
-except Exception as e:
-    print(f"[WARNING] tiktoken unavailable ({e}); falling back to a rough word-based estimate")
+# Illustrative reference rate for cost-tracking purposes. Our actual model
+# (qwen3:8b via local Ollama) is free -- this rate is a stand-in so the
+# cost-logging mechanism can be demonstrated as if against a paid API.
+INPUT_COST_PER_1K = 0.00015   # illustrative $/1K input tokens
+OUTPUT_COST_PER_1K = 0.0006   # illustrative $/1K output tokens
 
-    def count_tokens(text: str) -> int:
-        # ~4 characters per token is a commonly used rough estimate
-        return max(1, len(text) // 4)
+# ---------- Day 26: rate limiting (manual dict-based counter) ----------
+RATE_LIMIT_MAX_REQUESTS = 10
+RATE_LIMIT_WINDOW_SECONDS = 60
+_request_log: dict[str, list[float]] = {}  # member_id -> [timestamps]
+
+# ---------- Day 26: exact-match cache for general (non-member-specific) questions ----------
+_response_cache: dict[str, dict] = {}  # normalized_question -> {"answer", "citations"}
 
 
 # ---------- Step 1: conversations table ----------
@@ -70,11 +73,76 @@ def init_db():
             timestamp TEXT NOT NULL
         )
     """)
+    # ---------- Day 26 Step 2: usage log table ----------
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS usage_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            estimated_cost REAL NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 
 
 init_db()
+
+
+def log_usage(session_id: str, input_tokens: int, output_tokens: int):
+    estimated_cost = (input_tokens / 1000) * INPUT_COST_PER_1K + (output_tokens / 1000) * OUTPUT_COST_PER_1K
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO usage_log (session_id, timestamp, input_tokens, output_tokens, estimated_cost) VALUES (?, ?, ?, ?, ?)",
+        (session_id, datetime.now(timezone.utc).isoformat(), input_tokens, output_tokens, estimated_cost),
+    )
+    conn.commit()
+    conn.close()
+    print(f"[USAGE] session={session_id} input_tokens={input_tokens} output_tokens={output_tokens} "
+          f"estimated_cost=${estimated_cost:.6f}")
+
+
+# ---------- Step 3: rate limiter ----------
+def check_rate_limit(member_id: str) -> bool:
+    """Returns True if the request is allowed, False if rate-limited."""
+    now = time.monotonic()
+    timestamps = _request_log.setdefault(member_id, [])
+    # drop timestamps outside the window
+    timestamps[:] = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW_SECONDS]
+
+    if len(timestamps) >= RATE_LIMIT_MAX_REQUESTS:
+        return False
+
+    timestamps.append(now)
+    return True
+
+
+# ---------- Step 4: exact-match cache ----------
+def normalize_question(text: str) -> str:
+    return " ".join(text.strip().lower().split())
+
+
+def is_member_specific(question: str) -> bool:
+    """Member-specific questions (e.g. claim lookups) must never be cached,
+    since the same question text could legitimately mean different things
+    for different members' claim histories."""
+    return bool(re.search(r"c-?\d{3,5}", question, re.IGNORECASE))
+
+
+def get_cached_response(question: str) -> Optional[dict]:
+    if is_member_specific(question):
+        return None
+    key = normalize_question(question)
+    return _response_cache.get(key)
+
+
+def store_cached_response(question: str, answer: str, citation_ids: list[str]):
+    if is_member_specific(question):
+        return
+    key = normalize_question(question)
+    _response_cache[key] = {"answer": answer, "citations": citation_ids}
 
 
 # ---------- Step 2: save turns ----------
@@ -197,6 +265,17 @@ def health():
 def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
 
+    # ---------- Step 3: rate limiting, checked first (cheapest check) ----------
+    if not check_rate_limit(request.member_id):
+        print(f"[RATE LIMIT] member={request.member_id} exceeded {RATE_LIMIT_MAX_REQUESTS} requests/{RATE_LIMIT_WINDOW_SECONDS}s")
+
+        def rate_limited_generator():
+            canned = "You're sending requests too quickly. Please wait a moment and try again."
+            yield f"data: {canned}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(rate_limited_generator(), media_type="text/event-stream")
+
     # ---------- Step 4: input guardrail, checked BEFORE any LLM call ----------
     is_safe, block_reason = check_input_guardrail(request.message)
     print(f"[LOG] session={session_id} user_message={redact_pii(request.message)!r}")
@@ -212,6 +291,21 @@ def chat(request: ChatRequest):
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(blocked_generator(), media_type="text/event-stream")
+
+    # ---------- Step 4 (Day 26): exact-match cache check ----------
+    cached = get_cached_response(request.message)
+    if cached is not None:
+        print(f"[CACHE HIT] session={session_id} question={request.message!r}")
+
+        def cached_generator():
+            save_turn(session_id, "user", request.message)
+            save_turn(session_id, "assistant", cached["answer"])
+            yield f"data: {cached['answer']}\n\n"
+            if cached["citations"]:
+                yield f"data: [CITATIONS] {'|'.join(cached['citations'])}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(cached_generator(), media_type="text/event-stream")
 
     save_turn(session_id, "user", request.message)
 
@@ -293,12 +387,21 @@ def chat(request: ChatRequest):
                 is_output_safe, safe_answer = check_output_guardrail(full_answer)
                 print(f"[LOG] session={session_id} assistant_answer={redact_pii(full_answer)!r}")
 
+                # ---------- Day 26 Step 1 + 2: token counting and usage logging
+                # on every prompt + completion ----------
+                input_tokens = request_tokens
+                output_tokens = count_tokens(full_answer)
+                log_usage(session_id, input_tokens, output_tokens)
+
                 if not is_output_safe:
                     print(f"[GUARDRAIL] session={session_id} OUTPUT FLAGGED — saving redacted/disclaimer version to history")
                     save_turn(session_id, "assistant", safe_answer)
                     yield f"data: [SAFETY NOTICE] {safe_answer}\n\n"
                 else:
                     save_turn(session_id, "assistant", full_answer)
+                    # ---------- Day 26 Step 4: store in cache only for safe,
+                    # non-member-specific answers ----------
+                    store_cached_response(request.message, full_answer, citation_ids)
 
             if citation_ids:
                 yield f"data: [CITATIONS] {'|'.join(citation_ids)}\n\n"
