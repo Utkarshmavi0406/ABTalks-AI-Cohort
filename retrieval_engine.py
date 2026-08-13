@@ -67,6 +67,17 @@ def _extract_plan_name(question: str):
     return None
 
 
+# ---------- Day 27: extract EVERY plan name mentioned, not just the first ----------
+def _extract_all_plan_names(question: str) -> list[str]:
+    """Return every plan name mentioned in the question -- needed so a
+    two-plan comparison question doesn't silently drop the second plan."""
+    found = []
+    for plan in ["gold ppo", "silver hmo", "bronze hmo"]:
+        if plan in question.lower():
+            found.append(plan)
+    return found
+
+
 # ---------- Step 2: SQL lookup ----------
 def sql_lookup(question: str) -> list[str]:
     """Convert a structured question into SQL against plans/claims, return result strings."""
@@ -83,14 +94,35 @@ def sql_lookup(question: str) -> list[str]:
         for row in cur.fetchall():
             results.append(f"Claim {row[0]}: status={row[1]}, procedure={row[2]}, amount=${row[3]}")
 
-    plan_keyword = _extract_plan_name(question)
-    if plan_keyword and any(w in question.lower() for w in ["deductible", "premium", "copay"]):
-        cur.execute(
-            "SELECT plan_name, monthly_premium, annual_deductible, copay_pct FROM plans WHERE LOWER(plan_name) LIKE ?",
-            (f"%{plan_keyword}%",),
-        )
-        for row in cur.fetchall():
-            results.append(f"{row[0]}: premium=${row[1]}/mo, deductible=${row[2]}, copay={row[3]}%")
+    pricing_question = any(w in question.lower() for w in ["deductible", "premium", "copay"])
+    if pricing_question:
+        # Day 27 fix: the old version only looked up ONE plan (the first
+        # name matched) and returned nothing at all if no plan was named --
+        # which silently broke cross-plan comparison questions like "which
+        # plan has the lowest premium?" (found via RAGAS-style evaluation:
+        # faithfulness/relevancy both scored 0.0 on exactly these questions,
+        # because sql_lookup returned an empty list and the model correctly
+        # had nothing to answer from).
+        plan_keywords = _extract_all_plan_names(question)
+
+        if plan_keywords:
+            # One or more specific plans named -- return pricing for each
+            for plan_keyword in plan_keywords:
+                cur.execute(
+                    "SELECT plan_name, monthly_premium, annual_deductible, copay_pct FROM plans WHERE LOWER(plan_name) LIKE ?",
+                    (f"%{plan_keyword}%",),
+                )
+                for row in cur.fetchall():
+                    results.append(f"{row[0]}: premium=${row[1]}/mo, deductible=${row[2]}, copay={row[3]}%")
+        else:
+            # Pricing question naming no specific plan -- this is a
+            # cross-plan comparison ("which plan has the lowest premium?"),
+            # so return every plan's pricing and let the LLM compare them.
+            cur.execute(
+                "SELECT plan_name, monthly_premium, annual_deductible, copay_pct FROM plans"
+            )
+            for row in cur.fetchall():
+                results.append(f"{row[0]}: premium=${row[1]}/mo, deductible=${row[2]}, copay={row[3]}%")
 
     conn.close()
     return results
@@ -163,6 +195,9 @@ if __name__ == "__main__":
         "Is dental care covered for adults?",
         "What's the status of claim C1003?",
         "Does the Gold PPO plan cover routine eye care?",
+        "Which plan has the lowest monthly premium?",
+        "Which plan has the highest monthly premium?",
+        "How does the Gold PPO plan's copay compare to the Bronze HMO plan's copay?",
     ]
 
     for q in test_questions:

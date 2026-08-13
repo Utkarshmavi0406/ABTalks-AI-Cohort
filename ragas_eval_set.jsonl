@@ -1,0 +1,18 @@
+{"question": "What's the deductible on the Gold PPO plan?", "ground_truth": "The deductible on the Gold PPO plan is $2,000."}
+{"question": "What's the deductible on the Silver HMO plan?", "ground_truth": "The deductible on the Silver HMO plan is $1,500."}
+{"question": "What's the deductible on the Bronze HMO plan?", "ground_truth": "The deductible on the Bronze HMO plan is $1,000."}
+{"question": "Is cosmetic surgery covered under the Gold PPO plan?", "ground_truth": "No, cosmetic surgery is excluded from coverage under the Gold PPO plan."}
+{"question": "Is dental care covered for adults?", "ground_truth": "No, adult dental care is listed as an excluded service."}
+{"question": "Is routine eye care covered for adults?", "ground_truth": "No, routine eye care for adults is excluded from coverage."}
+{"question": "Are weight loss programs covered?", "ground_truth": "No, weight loss programs are excluded from coverage."}
+{"question": "Is private-duty nursing covered?", "ground_truth": "No, private-duty nursing is excluded from coverage."}
+{"question": "What's the status of claim C1001?", "ground_truth": "Claim C1001 is Pending. It's for an X-ray procedure with a claim amount of $250."}
+{"question": "What's the status of claim C1002?", "ground_truth": "Claim C1002 is Approved. It's for a Surgery procedure with a claim amount of $1,200."}
+{"question": "What's the status of claim C1003?", "ground_truth": "Claim C1003 is Denied. It's for an X-ray procedure with a claim amount of $150."}
+{"question": "What's the status of claim C1004?", "ground_truth": "Claim C1004 is Approved. It's for a Surgery procedure with a claim amount of $900."}
+{"question": "What's the status of claim C1005?", "ground_truth": "Claim C1005 is Pending. It's for an X-ray procedure with a claim amount of $50."}
+{"question": "Which plan has the lowest monthly premium?", "ground_truth": "The Bronze HMO plan has the lowest monthly premium at $150."}
+{"question": "Which plan has the highest monthly premium?", "ground_truth": "The Gold PPO plan has the highest monthly premium at $500."}
+{"question": "How does the Gold PPO plan's copay compare to the Bronze HMO plan's copay?", "ground_truth": "The Gold PPO plan has a 10% copay, while the Bronze HMO plan has a 30% copay -- Gold PPO's copay is lower."}
+{"question": "What's the copay percentage on the Silver HMO plan?", "ground_truth": "The copay percentage on the Silver HMO plan is 20%."}
+{"question": "Is acupuncture covered, and what's the visit limit?", "ground_truth": "Yes, acupuncture is covered, limited to 12 visits per year."}
