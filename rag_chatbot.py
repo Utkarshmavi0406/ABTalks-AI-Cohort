@@ -15,11 +15,8 @@ from retrieval_engine import retrieve
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama",  # Ollama ignores the key value, but the SDK requires one to be set
-)
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 MODEL = "qwen3:8b"
 

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.git/
+node_modules/
+dist/
+.DS_Store
+adapters/
+mcpb-bundle/
+chroma_data/
+*.jsonl
+*.json
+notebooks/
+source_docs/
+raw_text/

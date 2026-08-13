@@ -10,11 +10,12 @@ from pathlib import Path
 import pandas as pd
 import requests
 import streamlit as st
-
+import os
 from response_cards import try_build_card
 
 ROOT = Path(__file__).resolve().parent
-API_URL = "http://localhost:8000"
+
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Coverage Assistant", page_icon="⚕", layout="centered")
 

@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: coverage-chatbot-api/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Persist Chroma's vector data and the SQLite DB across container
+      # restarts/rebuilds, instead of baking a frozen snapshot into the image.
+      - ./chroma_data:/app/chroma_data
+      - ./coverage.db:/app/coverage.db
+    extra_hosts:
+      # Lets the container reach Ollama running on the host machine via
+      # host.docker.internal. Required on Linux; a harmless no-op on
+      # Docker Desktop for Mac/Windows, where this already works by default.
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      # Inside the Docker network, the frontend reaches the backend by its
+      # service name ("backend"), not localhost -- localhost inside the
+      # frontend container refers to the frontend container itself.
+      - API_URL=http://backend:8000
+    depends_on:
+      - backend
