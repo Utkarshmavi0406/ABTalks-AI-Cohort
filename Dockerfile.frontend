@@ -19,6 +19,7 @@ ENV PATH=/root/.local/bin:$PATH
 
 COPY app.py response_cards.py ./
 COPY data/plans.csv ./data/plans.csv
+COPY coverage.db ./
 
 EXPOSE 8501
 

@@ -8,7 +8,6 @@ dist/
 .DS_Store
 adapters/
 mcpb-bundle/
-chroma_data/
 *.jsonl
 *.json
 notebooks/

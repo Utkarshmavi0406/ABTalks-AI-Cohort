@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  type: ClusterIP  # internal only -- the frontend reaches it via the service DNS name "backend", same role http://backend:8000 played in Day 28's docker-compose.yml
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
