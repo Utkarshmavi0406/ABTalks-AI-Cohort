@@ -1,11 +1,11 @@
 """
 coverage-chatbot-api/main.py
-Day 20 — Conversation Memory & Context Management
+Day 30 — Monitoring & Observability
 
-Persists every chat turn to a SQLite `conversations` table, injects the
-last N turns plus any plan the member has already mentioned into the
-prompt, and summarizes the oldest half of a long conversation once it
-exceeds ~2000 tokens to keep the context window bounded.
+Adds Langfuse tracing around the LLM generation call: every request logs
+latency (automatic, via the span), token usage, and the full prompt/
+response. Everything from Day 20-29 (memory, guardrails, caching, rate
+limiting, usage logging) is unchanged.
 """
 
 import re
@@ -30,6 +30,7 @@ from retrieval_engine import retrieve  # noqa: E402
 from rag_chatbot import generate_answer_stream, client, MODEL  # noqa: E402
 from redact_pii import redact_pii  # noqa: E402  (Day 25)
 from guardrails_config import check_input_guardrail, check_output_guardrail  # noqa: E402  (Day 25)
+from langfuse import get_client as get_langfuse_client  # noqa: E402  (Day 30)
 
 app = FastAPI()
 
@@ -39,6 +40,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------- Day 30: Langfuse client, reads LANGFUSE_PUBLIC_KEY /
+# LANGFUSE_SECRET_KEY / LANGFUSE_HOST from the environment automatically ----------
+langfuse_client = get_langfuse_client()
 
 LAST_N_TURNS = 10
 TOKEN_BUDGET = 2000
@@ -359,53 +364,70 @@ def chat(request: ChatRequest):
         print(f"[TOKENS] session={session_id} history_tokens_before_summarize={tokens_before} "
               f"history_tokens_after_summarize={tokens_after} full_request_context_tokens={request_tokens}")
 
-        try:
-            for token in generate_answer_stream(request.message, augmented_context):
-                full_answer += token
-                safe_token = token.replace("\n", "\\n")
-                yield f"data: {safe_token}\n\n"
-        except Exception as e:
-            elapsed = time.monotonic() - start_time
-            print(f"[ERROR] /chat stream dropped for session {session_id} after {elapsed:.2f}s: {e}")
-            yield "data: [ERROR] The connection was lost while generating a response. Please try again.\n\n"
-        finally:
-            elapsed = time.monotonic() - start_time
-            print(f"[TIMING] /chat session={session_id} classification={classification} took {elapsed:.2f}s")
+        # ---------- Day 30: wrap the LLM call in a Langfuse generation span.
+        # Latency is captured automatically (span start/end time); we attach
+        # the full prompt now and the full response + token usage once the
+        # stream finishes, inside the finally block below. ----------
+        with langfuse_client.start_as_current_observation(
+            name="generate_answer",
+            as_type="generation",
+            model=MODEL,
+            input=augmented_context,
+        ) as generation:
+            try:
+                for token in generate_answer_stream(request.message, augmented_context):
+                    full_answer += token
+                    safe_token = token.replace("\n", "\\n")
+                    yield f"data: {safe_token}\n\n"
+            except Exception as e:
+                elapsed = time.monotonic() - start_time
+                print(f"[ERROR] /chat stream dropped for session {session_id} after {elapsed:.2f}s: {e}")
+                yield "data: [ERROR] The connection was lost while generating a response. Please try again.\n\n"
+            finally:
+                elapsed = time.monotonic() - start_time
+                print(f"[TIMING] /chat session={session_id} classification={classification} took {elapsed:.2f}s")
 
-            # ---------- Step 5: output guardrail ----------
-            # Limitation, stated plainly: since the answer was already
-            # streamed token-by-token, a flagged output can't be un-sent.
-            # This checks the FULL assembled answer after the fact, logs any
-            # PHI/medical-advice issue, saves the SAFE (redacted or
-            # disclaimer-replaced) version to persistent history rather than
-            # the raw text, and sends an additional safety-notice event so
-            # the client can display a correction. A production system would
-            # need to check the answer before streaming begins (e.g. a
-            # non-streamed pre-check call) to actually prevent a flagged
-            # response from ever reaching the member.
-            if full_answer:
-                is_output_safe, safe_answer = check_output_guardrail(full_answer)
-                print(f"[LOG] session={session_id} assistant_answer={redact_pii(full_answer)!r}")
+                # ---------- Step 5: output guardrail ----------
+                # Limitation, stated plainly: since the answer was already
+                # streamed token-by-token, a flagged output can't be un-sent.
+                # This checks the FULL assembled answer after the fact, logs any
+                # PHI/medical-advice issue, saves the SAFE (redacted or
+                # disclaimer-replaced) version to persistent history rather than
+                # the raw text, and sends an additional safety-notice event so
+                # the client can display a correction. A production system would
+                # need to check the answer before streaming begins (e.g. a
+                # non-streamed pre-check call) to actually prevent a flagged
+                # response from ever reaching the member.
+                if full_answer:
+                    is_output_safe, safe_answer = check_output_guardrail(full_answer)
+                    print(f"[LOG] session={session_id} assistant_answer={redact_pii(full_answer)!r}")
 
-                # ---------- Day 26 Step 1 + 2: token counting and usage logging
-                # on every prompt + completion ----------
-                input_tokens = request_tokens
-                output_tokens = count_tokens(full_answer)
-                log_usage(session_id, input_tokens, output_tokens)
+                    # ---------- Day 26 Step 1 + 2: token counting and usage logging
+                    # on every prompt + completion ----------
+                    input_tokens = request_tokens
+                    output_tokens = count_tokens(full_answer)
+                    log_usage(session_id, input_tokens, output_tokens)
 
-                if not is_output_safe:
-                    print(f"[GUARDRAIL] session={session_id} OUTPUT FLAGGED — saving redacted/disclaimer version to history")
-                    save_turn(session_id, "assistant", safe_answer)
-                    yield f"data: [SAFETY NOTICE] {safe_answer}\n\n"
-                else:
-                    save_turn(session_id, "assistant", full_answer)
-                    # ---------- Day 26 Step 4: store in cache only for safe,
-                    # non-member-specific answers ----------
-                    store_cached_response(request.message, full_answer, citation_ids)
+                    # ---------- Day 30: attach full latency/tokens/prompt/response
+                    # to the Langfuse trace ----------
+                    generation.update(
+                        output=full_answer,
+                        usage_details={"input": input_tokens, "output": output_tokens},
+                    )
 
-            if citation_ids:
-                yield f"data: [CITATIONS] {'|'.join(citation_ids)}\n\n"
-            yield "data: [DONE]\n\n"
+                    if not is_output_safe:
+                        print(f"[GUARDRAIL] session={session_id} OUTPUT FLAGGED — saving redacted/disclaimer version to history")
+                        save_turn(session_id, "assistant", safe_answer)
+                        yield f"data: [SAFETY NOTICE] {safe_answer}\n\n"
+                    else:
+                        save_turn(session_id, "assistant", full_answer)
+                        # ---------- Day 26 Step 4: store in cache only for safe,
+                        # non-member-specific answers ----------
+                        store_cached_response(request.message, full_answer, citation_ids)
+
+        if citation_ids:
+            yield f"data: [CITATIONS] {'|'.join(citation_ids)}\n\n"
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
