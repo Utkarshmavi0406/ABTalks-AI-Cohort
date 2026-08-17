@@ -7,3 +7,4 @@ chromadb
 pydantic
 tiktoken
 guardrails-ai
+langfuse
